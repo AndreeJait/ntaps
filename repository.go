@@ -390,7 +390,7 @@ func ensureUsecaseHasRepo(ucPkg, repoPkg string) error {
 	if repoPkg != ucPkg {
 		iface = toExport(repoPkg) + "Repo"
 	}
-	fieldName := lowerFirst(repoPkg) + "Repo"
+	fieldName := toCamelCase(repoPkg) + "Repo"
 
 	// ensure struct field
 	if strings.Contains(src, "type useCase struct") && !strings.Contains(src, fieldName+" "+iface) {
