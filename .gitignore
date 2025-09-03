@@ -1,0 +1,37 @@
+# Dependency directories (remove if you want to vendor)
+vendor/
+
+# =================================
+# IDE / Editor
+# =================================
+# IntelliJ / GoLand
+.idea/
+
+# VS Code
+.vscode/
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# MacOS
+.DS_Store
+# =================================
+# Go
+# =================================
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# =================================
+# Project-specific
+# =================================
+# Compiled binaries
+/bin/
+build/
+
