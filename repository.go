@@ -48,6 +48,13 @@ func runCreateRepository(pkg, method string, withParamRepo, withRespRepo, withTx
 		if err := ensureUsecaseHasRepo(addToUC, pkg); err != nil {
 			return err
 		}
+		
+		// ⬇️ add this to append the new repo arg at the call site
+		if err := updateInfraUsecaseInitArgs(addToUC, pkg); err != nil {
+			return err
+			// (or log and continue if you prefer a soft failure)
+			// fmt.Println("ℹ️", err)
+		}
 	}
 	return nil
 }
@@ -422,5 +429,49 @@ func ensureUsecaseHasRepo(ucPkg, repoPkg string) error {
 		}
 	}
 
+	return writeGoFile(path, src)
+}
+
+// append s.repo.<RepoPkg>Repo to the <ucPkg>.NewUseCase(...) call inside
+// internal/infrastructure/di/usecase.go (func (s wire) initUseCase()).
+func updateInfraUsecaseInitArgs(ucPkg, repoPkg string) error {
+	path := infraInitUsecasePath
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	src := string(b)
+
+	ucField := toPascalCase(ucPkg) + "Uc"                 // e.g. send -> SendUc
+	callPkg := ucPkg                                      // e.g. send
+	repoArg := "s.repo." + toPascalCase(repoPkg) + "Repo" // e.g. User -> s.repo.UserRepo
+
+	// Match: s.uc.SendUc = send.NewUseCase(<args>)
+	re := regexp.MustCompile(
+		fmt.Sprintf(`s\.uc\.%s\s*=\s*%s\.NewUseCase\(([\s\S]*?)\)`, ucField, callPkg),
+	)
+
+	m := re.FindStringSubmatchIndex(src)
+	if m == nil {
+		return fmt.Errorf("NewUseCase call for %q not found in %s", ucPkg, path)
+	}
+
+	// Capture group 1 are the args within (...)
+	argsStart, argsEnd := m[2], m[3]
+	args := src[argsStart:argsEnd]
+
+	// Already present? nothing to do.
+	if strings.Contains(args, repoArg) {
+		return nil
+	}
+
+	sep := ""
+	if strings.TrimSpace(args) != "" && !strings.HasSuffix(strings.TrimSpace(args), ",") {
+		sep = ", "
+	}
+	newArgs := args + sep + repoArg
+
+	src = src[:argsStart] + newArgs + src[argsEnd:]
 	return writeGoFile(path, src)
 }
