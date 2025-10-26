@@ -45,8 +45,8 @@ func Run(pkg, method string, withParamRepo, withRespRepo, withTx bool, addToUC s
 			fmt.Println("ℹ️  repo not added to usecase because usecase is not found:", addToUC)
 			return nil
 		}
-		// ensure usecase exists at least
-		if err := usecase.Run(addToUC, method, withParamRepo, withRespRepo); err != nil {
+		// ensure a useCase exists at least, but don't create a new method
+		if err := usecase.Run(addToUC, "", withParamRepo, withRespRepo); err != nil {
 			// we try but don't die if adding fails
 			fmt.Println("ℹ️  could not ensure usecase before wiring repo:", err)
 		}

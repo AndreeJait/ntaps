@@ -17,16 +17,18 @@ func Run(pkg, method string, withParam, withResp bool) error {
 		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", pkgDir, err)
 		}
-		if err := createPort(pkgDir, pkg, method, withParam, withResp); err != nil {
-			return err
+		if method != "" {
+			if err := createPort(pkgDir, pkg, method, withParam, withResp); err != nil {
+				return err
+			}
+			if err := createDTO(pkgDir, pkg, method, withParam, withResp); err != nil {
+				return err
+			}
+			if err := createImpl(pkgDir, pkg, method, withParam, withResp); err != nil {
+				return err
+			}
 		}
-		if err := createDTO(pkgDir, pkg, method, withParam, withResp); err != nil {
-			return err
-		}
-		if err := createImpl(pkgDir, pkg, method, withParam, withResp); err != nil {
-			return err
-		}
-	} else {
+	} else if method != "" {
 		if err := ensurePort(pkgDir, pkg, method, withParam, withResp); err != nil {
 			return err
 		}
