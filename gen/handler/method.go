@@ -115,27 +115,44 @@ func updateInfraHandlerInit(pkg string) error {
 	}
 	src := string(raw)
 
+	// 1. ensure import "<module>/internal/adapters/inbound/http/<pkg>"
 	importLine := fmt.Sprintf(`"%s/internal/adapters/inbound/http/%s"`, mod, pkg)
 	if !strings.Contains(src, importLine) {
 		src = util.InsertImport(src, importLine)
 	}
 
-	newItem := fmt.Sprintf("\t\t%s.New%sHandler(s.cfg, groupV1, s.uc),", pkg, util.ToPascalCase(pkg))
-	open := "var handlers = []http.Handler{"
-	start := strings.Index(src, open)
+	// 2. find handlers slice block: var handlers = []http.Handler{ ... }
+	openMarker := "var handlers = []http.Handler{"
+	start := strings.Index(src, openMarker)
 	if start == -1 {
 		return fmt.Errorf("handlers slice not found in %s", path)
 	}
-	after := src[start:]
-	end := strings.Index(after, "}")
-	if end == -1 {
+
+	after := src[start+len(openMarker):] // content after "{"
+	endRel := strings.Index(after, "}")
+	if endRel == -1 {
 		return fmt.Errorf("handlers slice closing '}' not found in %s", path)
 	}
-	block := after[:end]
-	if !strings.Contains(block, newItem) {
-		insertAt := start + end
-		src = src[:insertAt] + "\n" + newItem + "\n" + src[insertAt:]
+
+	blockStart := start + len(openMarker)
+	blockEnd := blockStart + endRel // position of '}'
+	block := src[blockStart:blockEnd]
+
+	// 3. build canonical ctor prefix
+	ctorPrefix := fmt.Sprintf(`%s.New%sHandler(`, pkg, util.ToPascalCase(pkg))
+
+	// If any line already calls <pkg>.New<Pkg>Handler(...), skip adding
+	if strings.Contains(block, ctorPrefix) {
+		return util.WriteGoFile(path, src)
 	}
+
+	// 4. otherwise insert default call before the end of slice
+	newCall := fmt.Sprintf("\n\t\t%s.New%sHandler(s.cfg, groupV1, s.uc),",
+		pkg,
+		util.ToPascalCase(pkg),
+	)
+
+	src = src[:blockEnd] + newCall + src[blockEnd:]
 
 	return util.WriteGoFile(path, src)
 }

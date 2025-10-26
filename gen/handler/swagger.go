@@ -9,10 +9,10 @@ import (
 )
 
 // normalizePathParams turns /send/transaction/:transaction_code
-// into /send/transaction/{transaction_code} for OpenAPI.
+// into /send/transaction/{transaction_code} for swagger,
+// and returns ["transaction_code"].
 func normalizePathParams(endpoint string) (normalized string, params []string) {
-	// case 1: Echo-style :param
-	//   /foo/:bar -> /foo/{bar}
+	// convert :param -> {param}
 	reColon := regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 	out := reColon.ReplaceAllStringFunc(endpoint, func(m string) string {
 		name := strings.TrimPrefix(m, ":")
@@ -20,21 +20,20 @@ func normalizePathParams(endpoint string) (normalized string, params []string) {
 		return "{" + name + "}"
 	})
 
-	// case 2: already {param}, collect them too
+	// also collect already-braced params {foo}
 	reBrace := regexp.MustCompile(`\{([A-Za-z0-9_]+)\}`)
 	matches := reBrace.FindAllStringSubmatch(out, -1)
 	for _, m := range matches {
 		if len(m) > 1 {
 			name := m[1]
-			// avoid duplicates
-			found := false
+			dup := false
 			for _, p := range params {
 				if p == name {
-					found = true
+					dup = true
 					break
 				}
 			}
-			if !found {
+			if !dup {
 				params = append(params, name)
 			}
 		}
@@ -43,6 +42,7 @@ func normalizePathParams(endpoint string) (normalized string, params []string) {
 	return out, params
 }
 
+// buildHandlerMethod generates the full handler method (swagger block + func body).
 func buildHandlerMethod(
 	handlerMethod string,
 	ucPkg string,
@@ -55,7 +55,7 @@ func buildHandlerMethod(
 	tag string,
 ) string {
 
-	// security annotation
+	// Security annotation
 	security := ""
 	switch strings.ToLower(endpointType) {
 	case "internal":
@@ -66,23 +66,27 @@ func buildHandlerMethod(
 
 	human := util.HumanizePascal(ucMethodName)
 
-	// figure out where the request comes from
+	// GET => request comes from query, others => body
 	paramLoc := "body"
-	if httpVerb == "GET" {
+	if strings.EqualFold(httpVerb, "GET") {
 		paramLoc = "query"
 	}
 
-	// normalize :param -> {param} for swagger
+	// Normalize /foo/:code -> /foo/{code} and collect ["code"]
 	normEndpoint, pathParams := normalizePathParams(endpoint)
 
-	// build swagger @Param lines for path params
+	// Path param swagger lines
+	// @Param transaction_code path string true "Transaction Code"
 	pathParamAnnots := ""
 	for _, p := range pathParams {
-		// standard: path params are always required and string (you can customize later)
-		pathParamAnnots += fmt.Sprintf(`// @Param        %s path string true "%s"`+"\n", p, util.HumanizePascal(p))
+		pathParamAnnots += fmt.Sprintf(
+			`// @Param        %s path string true "%s"`+"\n",
+			p,
+			util.HumanizePascal(p),
+		)
 	}
 
-	// build request param annot (@Param request ...)
+	// Body/query param swagger line (+ bind code)
 	paramAnnot := ""
 	paramLine := ""
 	callArgs := "ctx"
@@ -90,10 +94,9 @@ func buildHandlerMethod(
 	if withParamUc {
 		paramType := fmt.Sprintf("%s.%sRequest", ucPkg, ucMethodName)
 
-		// Only include the body/query annotation if there will actually be a body/query bind.
-		// Path params are documented separately via pathParamAnnots.
-		paramAnnot = fmt.Sprintf(`// @Param       request %s %s %s true "%sRequest"
-`, paramLoc, ucPkg, ucMethodName, ucMethodName)
+		// ✅ FIXED: single schema token transfer.InsertIntoManualTransferHistoriesRequest
+		paramAnnot = fmt.Sprintf(`// @Param       request %s %s true "%sRequest"
+`, paramLoc, paramType, ucMethodName)
 
 		paramLine = fmt.Sprintf(`
 	param := %s{}
@@ -103,26 +106,36 @@ func buildHandlerMethod(
 		callArgs = "ctx, param"
 	}
 
-	// build success response annotation and return body
+	// Response wiring
 	respType := ""
-	retOK := `return response.SuccessOK(c, nil, "success ` + strings.ToLower(human) + `")`
+	returnOK := `return response.SuccessOK(c, nil, "success ` + strings.ToLower(human) + `")`
+
 	if withResponseUc {
 		respType = fmt.Sprintf("%s.%sResponse", ucPkg, ucMethodName)
-		retOK = `return response.SuccessOK(c, resp, "success ` + strings.ToLower(human) + `")`
+		returnOK = `return response.SuccessOK(c, resp, "success ` + strings.ToLower(human) + `")`
 	}
 
-	// call the actual uc
+	// Call the UC
 	var callLine string
 	if withResponseUc {
-		callLine = fmt.Sprintf("resp, err := h.uc.%sUc.%s(%s)", util.ToPascalCase(ucPkg), ucMethodName, callArgs)
+		callLine = fmt.Sprintf(
+			"resp, err := h.uc.%sUc.%s(%s)",
+			util.ToPascalCase(ucPkg),
+			ucMethodName,
+			callArgs,
+		)
 	} else {
-		callLine = fmt.Sprintf("err := h.uc.%sUc.%s(%s)", util.ToPascalCase(ucPkg), ucMethodName, callArgs)
+		callLine = fmt.Sprintf(
+			"err := h.uc.%sUc.%s(%s)",
+			util.ToPascalCase(ucPkg),
+			ucMethodName,
+			callArgs,
+		)
 	}
 
-	// choose full route including /send, /internal/send, etc.
+	// Swagger @Router path needs prefix (/pkg or /internal/pkg)
 	fullRoute := util.RouterPath(ucPkg, endpointType, normEndpoint)
 
-	// final swagger block
 	return fmt.Sprintf(`
 
 // %s godoc
@@ -155,6 +168,6 @@ func (h *handler) %s(c echo.Context) error {
 		fullRoute,
 		strings.ToLower(httpVerb),
 		handlerMethod, handlerMethod, paramLine,
-		callLine, retOK,
+		callLine, returnOK,
 	)
 }
